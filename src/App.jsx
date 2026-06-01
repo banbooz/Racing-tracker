@@ -109,6 +109,7 @@ const isPast = (race) => parseDate(race.endDate) < todayStart();
 const isLiveNow = (race) => parseDate(race.startDate) <= todayStart() && parseDate(race.endDate) >= todayStart();
 const dateLabel = (date) => new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "2-digit", month: "short" }).format(date);
 const addDays = (dateString, days) => { const d = parseDate(dateString); d.setDate(d.getDate() + days); return d; };
+const hasOfficialTimes = (race) => Boolean((race.series === "F1" && F1_TIMES[race.id]) || (race.series === "WEC" && WEC_TIMES[race.id]));
 
 function getDaysAway(race) {
   const diff = Math.ceil((parseDate(race.startDate) - todayStart()) / 86400000);
@@ -127,13 +128,13 @@ function formatDateRange(startDate, endDate) {
   return `${new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short" }).format(start)}–${new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short" }).format(end)}`;
 }
 
+function mapOfficialSessions(rows, detail) {
+  return rows.map(([day, type, name, time]) => ({ day, type, name, time, detail }));
+}
+
 function getWeekendSessions(race) {
-  if (race.series === "F1" && F1_TIMES[race.id]) {
-    return F1_TIMES[race.id].map(([day, type, name, time]) => ({ day, type, name, time, detail: "Official F1 schedule time shown in UK/My Time." }));
-  }
-  if (race.series === "WEC" && WEC_TIMES[race.id]) {
-    return WEC_TIMES[race.id].map(([day, type, name, time]) => ({ day, type, name, time, detail: "Official FIA WEC schedule time shown from the event page." }));
-  }
+  if (race.series === "F1" && F1_TIMES[race.id]) return mapOfficialSessions(F1_TIMES[race.id], "Official F1 schedule time shown in UK/My Time.");
+  if (race.series === "WEC" && WEC_TIMES[race.id]) return mapOfficialSessions(WEC_TIMES[race.id], "Official FIA WEC schedule time shown from the event page.");
 
   const d0 = parseDate(race.startDate);
   const d1 = addDays(race.startDate, 1);
@@ -148,42 +149,34 @@ function getWeekendSessions(race) {
     { day: dateLabel(d2), type: "Qualifying", name: "Qualifying Race 2", time: unreleased, detail: note },
     { day: dateLabel(d2), type: "Race", name: "Race 2", time: unreleased, detail: note },
   ];
-
   if (race.series === "WEC") return [
     { day: dateLabel(d0), type: "Practice", name: "Free Practice 1", time: unreleased, detail: note },
-    { day: dateLabel(d0), type: "Practice", name: "Free Practice 2", time: unreleased, detail: note },
-    { day: dateLabel(d1), type: "Practice", name: "Free Practice 3", time: unreleased, detail: note },
     { day: dateLabel(d1), type: "Qualifying", name: "Qualifying / Hyperpole", time: unreleased, detail: note },
     { day: dateLabel(d2), type: "Race", name: race.title, time: unreleased, detail: race.time },
   ];
-
   if (race.series === "EGT" && race.time.includes("Sprint")) return [
     { day: dateLabel(d0), type: "Practice", name: "Free Practice", time: unreleased, detail: note },
     { day: dateLabel(d1), type: "Qualifying", name: "Qualifying", time: unreleased, detail: note },
     { day: dateLabel(d1), type: "Race", name: "Sprint Race 1", time: unreleased, detail: note },
     { day: dateLabel(d2), type: "Race", name: "Sprint Race 2", time: unreleased, detail: note },
   ];
-
   if (race.series === "EGT") return [
     { day: dateLabel(d0), type: "Practice", name: "Free Practice", time: unreleased, detail: note },
     { day: dateLabel(d1), type: "Practice", name: "Pre-Qualifying", time: unreleased, detail: note },
     { day: dateLabel(d1), type: "Qualifying", name: "Qualifying", time: unreleased, detail: note },
     { day: dateLabel(d2), type: "Race", name: race.title, time: unreleased, detail: race.time },
   ];
-
   if (race.series === "BGT" && race.time.includes("2x")) return [
     { day: dateLabel(d0), type: "Practice", name: "Free Practice", time: unreleased, detail: note },
     { day: dateLabel(d1), type: "Qualifying", name: "Qualifying", time: unreleased, detail: note },
     { day: dateLabel(d1), type: "Race", name: "Race 1", time: unreleased, detail: note },
     { day: dateLabel(d2), type: "Race", name: "Race 2", time: unreleased, detail: note },
   ];
-
   if (race.series === "BGT") return [
     { day: dateLabel(d0), type: "Practice", name: "Free Practice", time: unreleased, detail: note },
     { day: dateLabel(d1), type: "Qualifying", name: "Qualifying", time: unreleased, detail: note },
     { day: dateLabel(d2), type: "Race", name: race.title, time: unreleased, detail: race.time },
   ];
-
   return [
     { day: dateLabel(d0), type: "Practice", name: "Practice / Warm-up", time: unreleased, detail: note },
     { day: dateLabel(d1), type: "Qualifying", name: "Qualifying", time: unreleased, detail: note },
@@ -195,6 +188,7 @@ function RaceCard({ race, index, faded, onOpen }) {
   const series = SERIES[race.series];
   const past = faded || isPast(race);
   const live = isLiveNow(race);
+  const official = hasOfficialTimes(race);
   return (
     <motion.article initial={{ opacity: 0, y: 18 }} animate={{ opacity: past ? 0.46 : 1, y: 0 }} transition={{ delay: index * 0.025 }} className={`group overflow-hidden rounded-3xl border bg-zinc-950 shadow-2xl shadow-black/30 ${past ? "border-white/5 grayscale" : "border-white/10"}`}>
       <button onClick={() => onOpen(race)} className="block w-full text-left">
@@ -203,22 +197,29 @@ function RaceCard({ race, index, faded, onOpen }) {
           <div className="relative flex items-start justify-between gap-4"><div><div className="mb-3 inline-flex items-center gap-2 rounded-full bg-black/35 px-3 py-1 text-xs font-bold uppercase tracking-[0.24em] text-white/90 backdrop-blur"><span className={`h-2 w-2 rounded-full ${series.accent}`} />{series.full}</div><h2 className="max-w-md text-2xl font-black uppercase leading-none tracking-tight text-white md:text-3xl">{race.title}</h2><p className="mt-2 text-sm font-bold uppercase tracking-[0.18em] text-white/70">{race.round}</p></div><div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-white/25 bg-white/10 text-xl font-black text-white shadow-xl backdrop-blur">{series.icon}</div></div>
           <div className="relative mt-8 grid grid-cols-2 gap-3 text-sm text-white md:grid-cols-4"><Info icon={<Clock />} main={getDaysAway(race)} sub={formatDateRange(race.startDate, race.endDate)} /><Info icon={<MapPin />} main={race.track} sub={race.location} /><Info icon={<Flag />} main={race.time} sub={race.country} /><Info icon={<Star />} main={race.priority} sub="Priority" /></div>
         </div>
-        <div className="border-t border-white/10 bg-zinc-950 p-5"><div className="mb-4 flex flex-wrap items-center gap-2"><span className={`rounded-full px-3 py-1 text-xs font-black uppercase ${past ? "bg-zinc-700 text-zinc-300" : "bg-white text-zinc-950"}`}>{past ? "Finished" : live ? "On now" : race.status}</span>{race.major && <span className="inline-flex items-center gap-1 rounded-full bg-yellow-300 px-3 py-1 text-xs font-black uppercase text-zinc-950"><Trophy className="h-3 w-3" /> Mega</span>}<span className="rounded-full border border-white/10 px-3 py-1 text-xs font-bold uppercase text-zinc-400">{series.name}</span><span className="rounded-full border border-red-400/40 bg-red-500/10 px-3 py-1 text-xs font-black uppercase text-red-200">Click for sessions</span></div><p className="text-sm leading-6 text-zinc-300">{race.notes}</p></div>
+        <div className="border-t border-white/10 bg-zinc-950 p-5"><div className="mb-4 flex flex-wrap items-center gap-2"><span className={`rounded-full px-3 py-1 text-xs font-black uppercase ${past ? "bg-zinc-700 text-zinc-300" : "bg-white text-zinc-950"}`}>{past ? "Finished" : live ? "On now" : race.status}</span>{race.major && <span className="inline-flex items-center gap-1 rounded-full bg-yellow-300 px-3 py-1 text-xs font-black uppercase text-zinc-950"><Trophy className="h-3 w-3" /> Mega</span>}<span className="rounded-full border border-white/10 px-3 py-1 text-xs font-bold uppercase text-zinc-400">{series.name}</span><span className={`rounded-full border px-3 py-1 text-xs font-black uppercase ${official ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-200" : "border-zinc-500/40 bg-zinc-800 text-zinc-300"}`}>{official ? "Official times visible" : "Official TBC"}</span><span className="rounded-full border border-red-400/40 bg-red-500/10 px-3 py-1 text-xs font-black uppercase text-red-200">Click full sessions</span></div><p className="text-sm leading-6 text-zinc-300">{race.notes}</p><SessionPreview race={race} /></div>
       </button>
     </motion.article>
   );
+}
+
+function SessionPreview({ race }) {
+  const sessions = getWeekendSessions(race);
+  const mainRace = [...sessions].reverse().find((session) => session.type === "Race") || sessions[sessions.length - 1];
+  const preview = [sessions[0], sessions.find((session) => session.type === "Qualifying") || sessions[1], mainRace].filter(Boolean);
+  return <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-3"><p className="mb-2 text-xs font-black uppercase tracking-[0.2em] text-zinc-500">Session times</p><div className="grid gap-2">{preview.map((session, index) => <div key={`${race.id}-preview-${index}`} className="grid grid-cols-[70px_1fr_95px] items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2 text-xs"><p className="font-bold text-zinc-400">{session.day}</p><p className="truncate font-black uppercase text-white">{session.name}</p><p className="text-right font-black text-white">{session.time}</p></div>)}</div></div>;
 }
 
 function RaceModal({ race, onClose }) {
   if (!race) return null;
   const series = SERIES[race.series];
   const sessions = getWeekendSessions(race);
-  const hasVerifiedTimes = (race.series === "F1" && F1_TIMES[race.id]) || (race.series === "WEC" && WEC_TIMES[race.id]);
+  const official = hasOfficialTimes(race);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" onClick={onClose}>
       <motion.div initial={{ opacity: 0, scale: 0.96, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[2rem] border border-white/10 bg-zinc-950 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className={`relative bg-gradient-to-br ${series.gradient} p-6 md:p-8`}><button onClick={onClose} className="absolute right-4 top-4 rounded-2xl bg-black/35 p-3 text-white backdrop-blur hover:bg-black/55"><X className="h-5 w-5" /></button><div className="mb-4 inline-flex items-center gap-2 rounded-full bg-black/35 px-3 py-1 text-xs font-bold uppercase tracking-[0.24em] text-white/90 backdrop-blur"><span className={`h-2 w-2 rounded-full ${series.accent}`} />{series.full}</div><h2 className="max-w-3xl text-4xl font-black uppercase leading-none tracking-tight text-white md:text-6xl">{race.title}</h2><p className="mt-3 text-sm font-bold uppercase tracking-[0.18em] text-white/75">{race.round} • {formatDateRange(race.startDate, race.endDate)}</p><div className="mt-6 grid gap-3 text-sm text-white md:grid-cols-3"><Info icon={<MapPin />} main={race.track} sub={`${race.location}, ${race.country}`} /><Info icon={<Flag />} main={race.time} sub={race.status} /><Info icon={<Timer />} main={getDaysAway(race)} sub="Weekend status" /></div></div>
-        <div className="p-5 md:p-8"><div className="mb-5 flex items-center gap-3"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-600"><ListChecks className="h-6 w-6" /></div><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Weekend breakdown</p><h3 className="text-2xl font-black uppercase">Practice, qualifying and races</h3></div></div><div className="grid gap-3">{sessions.map((session, index) => <SessionRow key={`${session.name}-${index}`} session={session} index={index} />)}</div><p className="mt-6 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm leading-6 text-zinc-400">{hasVerifiedTimes ? "These session times have been entered from official race schedule pages." : "For this series, the detailed practice/qualifying session timetable has not been verified yet, so the app does not invent times."}</p></div>
+        <div className="p-5 md:p-8"><div className="mb-5 flex items-center gap-3"><div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-600"><ListChecks className="h-6 w-6" /></div><div><p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Weekend breakdown</p><h3 className="text-2xl font-black uppercase">Practice, qualifying and races</h3></div></div><div className="grid gap-3">{sessions.map((session, index) => <SessionRow key={`${session.name}-${index}`} session={session} index={index} />)}</div><p className="mt-6 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm leading-6 text-zinc-400">{official ? "These session times are entered from official race schedule pages and are visible on the card and here." : "This event needs an official timetable source before exact times are added. No fake times are used."}</p></div>
       </motion.div>
     </div>
   );
@@ -235,21 +236,21 @@ export default function App() {
   const [activeSeries, setActiveSeries] = useState("ALL");
   const [query, setQuery] = useState("");
   const [selectedRace, setSelectedRace] = useState(null);
-  const allUpcoming = RACES.filter((race) => !isPast(race)).sort((a, b) => parseDate(a.startDate) - parseDate(b.startDate));
-  const nextRace = allUpcoming[0];
-  const filteredRaces = useMemo(() => { const base = activeSeries === "ALL" ? RACES.filter((race) => !isPast(race)) : RACES.filter((race) => race.series === activeSeries); return base.filter((race) => `${race.title} ${race.round} ${race.track} ${race.location} ${race.country} ${SERIES[race.series].full}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => parseDate(a.startDate) - parseDate(b.startDate)); }, [activeSeries, query]);
+  const upcoming = RACES.filter((race) => !isPast(race)).sort((a, b) => parseDate(a.startDate) - parseDate(b.startDate));
+  const nextRace = upcoming[0];
+  const filteredRaces = useMemo(() => { const base = activeSeries === "ALL" ? RACES : RACES.filter((race) => race.series === activeSeries); return base.filter((race) => `${race.title} ${race.round} ${race.track} ${race.location} ${race.country} ${SERIES[race.series].full}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => parseDate(a.startDate) - parseDate(b.startDate)); }, [activeSeries, query]);
 
   return (
     <main className="min-h-screen overflow-hidden bg-zinc-950 text-white">
       <div className="pointer-events-none fixed inset-0 opacity-40"><div className="absolute left-[-10%] top-[-20%] h-96 w-96 rounded-full bg-red-600 blur-3xl" /><div className="absolute right-[-10%] top-20 h-96 w-96 rounded-full bg-blue-700 blur-3xl" /><div className="absolute bottom-[-20%] left-1/3 h-96 w-96 rounded-full bg-yellow-500 blur-3xl" /></div>
       <section className="relative mx-auto max-w-7xl px-4 py-8 md:px-8 md:py-12">
-        <header className="mb-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-2xl backdrop-blur md:p-8"><div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div><div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm font-bold uppercase tracking-[0.24em] text-zinc-300"><Gauge className="h-4 w-4 text-red-400" />Race Hub 2026</div><h1 className="max-w-4xl text-5xl font-black uppercase leading-[0.9] tracking-tighter md:text-7xl">All your racing in one pile</h1><p className="mt-4 max-w-2xl text-base leading-7 text-zinc-300 md:text-lg">Click any race weekend to open practice, qualifying, sprint and race sessions. F1 and the verified WEC rounds now include real official session times.</p></div><div className="grid gap-3 sm:grid-cols-3 lg:w-[460px]"><Stat value={allUpcoming.length} label="Still upcoming" /><Stat value={Object.keys(SERIES).length} label="Series tabs" /><Stat value={RACES.filter(isPast).length} label="Greyed out" /></div></div></header>
+        <header className="mb-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-2xl backdrop-blur md:p-8"><div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div><div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm font-bold uppercase tracking-[0.24em] text-zinc-300"><Gauge className="h-4 w-4 text-red-400" />Race Hub 2026</div><h1 className="max-w-4xl text-5xl font-black uppercase leading-[0.9] tracking-tighter md:text-7xl">All your racing in one pile</h1><p className="mt-4 max-w-2xl text-base leading-7 text-zinc-300 md:text-lg">All race weekends are visible on the site now. Session times show directly on each card. Click a card for the full session list.</p></div><div className="grid gap-3 sm:grid-cols-3 lg:w-[460px]"><Stat value={upcoming.length} label="Still upcoming" /><Stat value={Object.keys(SERIES).length} label="Series tabs" /><Stat value={RACES.filter(hasOfficialTimes).length} label="Official times" /></div></div></header>
         {nextRace && <section className="mb-8 rounded-[2rem] border border-white/10 bg-black/40 p-5 shadow-2xl backdrop-blur md:p-6"><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-4"><div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-600 shadow-lg shadow-red-600/30"><Flame className="h-7 w-7" /></div><div><p className="text-sm font-bold uppercase tracking-[0.22em] text-zinc-400">Next thing to watch</p><h2 className="text-2xl font-black uppercase">{nextRace.title}</h2><p className="text-sm text-zinc-400">{SERIES[nextRace.series].full} • {nextRace.track}, {nextRace.location}</p></div></div><button onClick={() => setSelectedRace(nextRace)} className="rounded-2xl bg-white px-5 py-3 text-left text-zinc-950 hover:bg-zinc-200"><p className="text-sm font-bold uppercase text-zinc-500">Starts</p><p className="text-xl font-black">{getDaysAway(nextRace)}</p></button></div></section>}
-        <section className="mb-8 flex flex-col gap-4 rounded-[2rem] border border-white/10 bg-white/[0.04] p-4 backdrop-blur md:flex-row md:items-center md:justify-between"><div className="relative flex-1"><Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500" /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search series, track, place, country..." className="w-full rounded-2xl border border-white/10 bg-black/40 py-4 pl-12 pr-4 font-semibold text-white outline-none ring-red-500/40 placeholder:text-zinc-600 focus:ring-4" /></div><div className="flex flex-wrap gap-2"><Filter active={activeSeries === "ALL"} onClick={() => setActiveSeries("ALL")}>All upcoming</Filter>{Object.entries(SERIES).map(([key, series]) => <Filter key={key} active={activeSeries === key} onClick={() => setActiveSeries(key)}>{series.name}</Filter>)}</div></section>
-        <div className="mb-5 flex items-center justify-between gap-4"><div><p className="text-sm font-bold uppercase tracking-[0.22em] text-zinc-500">{activeSeries === "ALL" ? "Upcoming pile" : `${SERIES[activeSeries].full} full 2026 list`}</p><h2 className="text-3xl font-black uppercase">{activeSeries === "ALL" ? "Not finished yet" : "Series archive"}</h2></div><p className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm font-black text-zinc-300">{filteredRaces.length} shown</p></div>
+        <section className="mb-8 flex flex-col gap-4 rounded-[2rem] border border-white/10 bg-white/[0.04] p-4 backdrop-blur md:flex-row md:items-center md:justify-between"><div className="relative flex-1"><Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-500" /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search series, track, place, country..." className="w-full rounded-2xl border border-white/10 bg-black/40 py-4 pl-12 pr-4 font-semibold text-white outline-none ring-red-500/40 placeholder:text-zinc-600 focus:ring-4" /></div><div className="flex flex-wrap gap-2"><Filter active={activeSeries === "ALL"} onClick={() => setActiveSeries("ALL")}>All races</Filter>{Object.entries(SERIES).map(([key, series]) => <Filter key={key} active={activeSeries === key} onClick={() => setActiveSeries(key)}>{series.name}</Filter>)}</div></section>
+        <div className="mb-5 flex items-center justify-between gap-4"><div><p className="text-sm font-bold uppercase tracking-[0.22em] text-zinc-500">{activeSeries === "ALL" ? "Every race weekend" : `${SERIES[activeSeries].full} full 2026 list`}</p><h2 className="text-3xl font-black uppercase">{activeSeries === "ALL" ? "All races and times" : "Series archive"}</h2></div><p className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm font-black text-zinc-300">{filteredRaces.length} shown</p></div>
         <section className="grid gap-6 lg:grid-cols-2">{filteredRaces.map((race, index) => <RaceCard key={race.id} race={race} index={index} faded={activeSeries !== "ALL" && isPast(race)} onOpen={setSelectedRace} />)}</section>
         {filteredRaces.length === 0 && <div className="rounded-[2rem] border border-white/10 bg-black/40 p-10 text-center"><CalendarDays className="mx-auto mb-4 h-10 w-10 text-zinc-500" /><h2 className="text-2xl font-black uppercase">No races found</h2><p className="mt-2 text-zinc-400">Try another search or series filter.</p></div>}
-        <footer className="mt-10 rounded-[2rem] border border-white/10 bg-black/40 p-5 text-sm leading-6 text-zinc-400">All automatically hides finished weekends from the main pile. Series tabs keep every 2026 weekend visible, with past races greyed out.</footer>
+        <footer className="mt-10 rounded-[2rem] border border-white/10 bg-black/40 p-5 text-sm leading-6 text-zinc-400">Past races are greyed in series tabs. Cards with green badges have official times loaded. Cards marked Official TBC still need a verified official timetable before exact times are added.</footer>
       </section>
       <RaceModal race={selectedRace} onClose={() => setSelectedRace(null)} />
     </main>
